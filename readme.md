@@ -18,7 +18,7 @@ A VLE implementing the Full LTI specification (or a subset thereof) can register
  * Drupal 7
  * [LTILib](https://github.com/clarkdave/LTILib)
  * A VLE which has an implementation of the Full LTI spec
-	** e.g. The [eile](http://code.google.com/p/eile/) project for Moodle
+	* e.g. The [eile](http://code.google.com/p/eile/) project for Moodle
  
 ## License 
 
