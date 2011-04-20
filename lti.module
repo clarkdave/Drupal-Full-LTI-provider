@@ -54,11 +54,11 @@ function lti_action_register() {
     </tp:tool_info>
     <tp:tool_instance>
       <tp:contact>
-        <pc:email>dec6@kent.ac.uk</pc:email>
+        <pc:email>someone@example.com</pc:email>
       </tp:contact>
       <tp:base_urls>
-        <tp:base_url type="default">http://seras/drupal/</tp:base_url>
-        <tp:base_url type="icon_default">http://seras/drupal/modules/lti/img/</tp:base_url>
+        <tp:base_url type="default">http://localhost/drupal/</tp:base_url>
+        <tp:base_url type="icon_default">http://localhost/drupal/modules/lti/img/</tp:base_url>
       </tp:base_urls>
     </tp:tool_instance>
     <tp:messages>
