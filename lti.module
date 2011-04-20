@@ -1,0 +1,453 @@
+<?php
+
+require_once 'LTILib.class.php';
+
+/**
+ * Implements hook_init()
+ * Check the $_GET vars to see if we should respond to an LTI request.
+ */
+function lti_init() {
+
+	if (isset($_GET['lti_deploy'])) {
+
+		// register the tool
+		lti_action_register();
+		
+	} else if (isset($_GET['lti_menu_view_request']) && $_GET['lti_menu_view_request'] == 2) {
+		
+		lti_action_administer();
+		
+	} else if (isset($_GET['lti_menu_view_request']) && $_GET['lti_menu_view_request'] == 1) {
+		
+		lti_action_view();
+	
+	} else if (isset($_GET['lti_ping'])) {
+		
+		die(); // 200 OK is needed
+	}
+}
+
+/**
+ * Register this module with the consumer.
+ */
+function lti_action_register() {
+	
+	$lti = new LTILib($_POST);
+
+	$secret = user_password(64);
+
+	$provider_profile_xml = <<<XML
+<?xml version="1.0"?>
+<tool_registration_request xmlns="http://www.imsglobal.org/services/ltiv2p0/ltirgsv1p0/imsltiRGS_v1p0" xmlns:sec="http://www.imsglobal.org/xsd/imsltiSEC_v1p0" xmlns:tp="http://www.imsglobal.org/xsd/imsltiTPR_v1p0" xmlns:cm="http://www.imsglobal.org/xsd/imsltiMSS_v1p0" xmlns:pc="http://www.imsglobal.org/xsd/imsltiPC_v1p0">
+  <tool_profile lti_version="2.0">
+    <tp:vendor>
+      <pc:code>DRUPAL.7.0</pc:code>
+      <pc:name>DRUPAL</pc:name>
+      <pc:contact>
+        <pc:email>drupal@drupal.org</pc:email>
+      </pc:contact>
+    </tp:vendor>
+    <tp:tool_info>
+      <pc:code>drupal.tool</pc:code>
+      <pc:name>Drupal Tool</pc:name>
+      <pc:version>1.0</pc:version>
+    </tp:tool_info>
+    <tp:tool_instance>
+      <tp:contact>
+        <pc:email>dec6@kent.ac.uk</pc:email>
+      </tp:contact>
+      <tp:base_urls>
+        <tp:base_url type="default">http://seras/drupal/</tp:base_url>
+        <tp:base_url type="icon_default">http://seras/drupal/modules/lti/img/</tp:base_url>
+      </tp:base_urls>
+    </tp:tool_instance>
+    <tp:messages>
+      <tp:message type="ping" path="?lti_ping=1"/>
+    </tp:messages>
+    <tp:links>
+      <tp:menu_link>
+        <tp:title>Administer course discussion</tp:title>
+        <tp:messages>
+          <tp:message type="menu-view-request" path="?lti_menu_view_request=2">
+            <tp:parameter name="course_shortname" variable="\$CourseOffering.label"/>
+            <tp:parameter name="course_title" variable="\$CourseOffering.title"/>
+            <tp:parameter name="person_fullname" variable="\$Person.name.full"/>
+            <tp:parameter name="person_email" variable="\$Person.email.primary"/>
+          </tp:message>
+        </tp:messages>
+        <tp:icons>
+          <pc:icon>drupal.png</pc:icon>
+        </tp:icons>
+        <tp:category_choice>
+          <tp:category>context-tool-administration</tp:category>
+        </tp:category_choice>
+        <tp:document_target>iframe</tp:document_target>
+      </tp:menu_link>
+      <tp:menu_link>
+        <tp:title>Course discussion</tp:title>
+        <tp:messages>
+          <tp:message type="menu-view-request" path="?lti_menu_view_request=1">
+            <tp:parameter name="course_shortname" variable="\$CourseOffering.label"/>
+            <tp:parameter name="course_title" variable="\$CourseOffering.title"/>
+            <tp:parameter name="person_fullname" variable="\$Person.name.full"/>
+            <tp:parameter name="person_email" variable="\$Person.email.primary"/>
+          </tp:message>
+        </tp:messages>
+        <tp:icons>
+          <pc:icon>drupal.png</pc:icon>
+        </tp:icons>
+        <tp:category_choice>
+          <tp:category>context-tool</tp:category>
+        </tp:category_choice>
+        <tp:document_target>iframe</tp:document_target>
+      </tp:menu_link>
+    </tp:links>
+  </tool_profile>
+  <system_settings>
+    <cm:property name="document_target">iframe</cm:property>
+    <cm:property name="window_name">ltiiframe</cm:property>
+    <cm:property name="height">500px</cm:property>
+    <cm:property name="width">100%</cm:property>
+  </system_settings>
+  <security_contract>
+    <shared_secret>$secret</shared_secret>
+    <security_profiles>
+      <sec:basic_hash_message_security_profile>
+        <sec:algorithm>SHA-1</sec:algorithm>
+      </sec:basic_hash_message_security_profile>
+    </security_profiles>
+  </security_contract>
+</tool_registration_request>
+XML;
+
+	$required_capabilities = array(
+		'ping',
+		'menulink-category-context-tool',
+		'menulink-category-context-administration',
+		'tool-proxy-removed-notification',
+	);
+	
+	try {
+		$lti->getProvider()->setProfileXML($provider_profile_xml);
+
+		$lti->register(
+			
+			function ($consumer) use ($required_capabilities) {
+				// check capabilities
+				if (!$consumer->hasCapabilities($required_capabilities)) return false;
+
+				// check security
+				if (!$profile = $consumer->getSecurityProfile('basic_hash_message_security_profile')) return false;
+				
+				// SHA-1 encryption required
+				if ($profile->getConfigItem('algorithm') != 'SHA-1') return false;
+				
+				return true;
+			},
+			
+			function ($tool_proxy_guid, $consumer, $packet) use ($secret) {
+				
+				// we need to add this consumer into the DB now
+				try {
+					$id = db_insert('lti_consumers')->fields(array(
+						'tool_proxy_guid' => $tool_proxy_guid,
+						'consumer_guid' => $consumer->getGuid(),
+						'consumer_user_id' => $packet->user_id,
+						'secret' => $secret,
+						'time' => time(),
+						)
+					)->execute();
+				} catch (Exception $e) {
+					throw new LTILibException('Could not update database ('.$e->getMessage().')');
+				}
+			}
+		);
+
+	} catch (LTILibValidationException $e) {
+		// you could use this exception to indicate what the consumer must support
+		echo "LTILib validation exception: <strong>" . $e->getMessage() . '</strong>';
+		die();
+	} catch (LTILibRegistrationException $e) {
+		echo "LTILib registration unsuccessful: <strong>" . $e->getMessage() . '</strong>';
+		die();
+	} catch (LTILibException $e) {
+		echo "Fatal LTILib exception: <strong>" . $e->getMessage() . '</strong>';
+		die();
+	}
+}
+
+/**
+ * The administer action allows a privileged user to create a new course
+ * article. If the article was already created, the user will be directed
+ * at the article's edit page instead.
+ */
+function lti_action_administer() {
+	
+	$lti = new LTILib($_POST);
+	
+	$secret = db_query("SELECT secret FROM lti_consumers WHERE tool_proxy_guid = :guid", array(
+		':guid' => $lti->getPacket()->tool_proxy_guid
+	))->fetchField();
+	
+	try {
+		
+		// try to authenticate this request
+		$lti->authenticate($secret);
+		
+		// authenticate the user - log them in or create a new
+		// user if necessary
+		$user = lti_auth_user($lti);
+		
+		// create the node if it doesn't already exist
+		$node_id = lti_create_course_article($lti, $user);
+		
+		// redirect to show our new node
+		drupal_goto('node/' . $node_id . '/edit');
+		
+	} catch (LTILibException $e) {
+		echo "Fatal LTILib exception: <strong>" . $e->getMessage() . '</strong>';
+		die();
+	} catch (Exception $e) {
+		echo "Exception: <strong>" . $e->getMessage() . '</strong>';
+		die();
+	}
+}
+
+/**
+ * View a course page. If the page doesn't exist, which could occur if a
+ * non-administrator tries to view the page first, the homepage will be
+ * shown instead and a warning will be displayed.
+ */
+function lti_action_view() {
+	
+	$lti = new LTILib($_POST);
+		
+	$secret = db_query("SELECT secret FROM lti_consumers WHERE tool_proxy_guid = :guid", array(
+		':guid' => $lti->getPacket()->tool_proxy_guid
+	))->fetchField();
+	
+	try {
+		
+		$lti->authenticate($secret);
+		$user = lti_auth_user($lti);
+		$node_id = lti_get_course_article_id($lti, $user);
+		
+		if ($node_id) {
+			drupal_goto('node/' . $node_id);
+		} else {
+			drupal_set_message('The course page for this module has not been created. Please contact your instructor.', 'warning');
+		}
+		
+	} catch (LTILibException $e) {
+		echo "Fatal LTILib exception: <strong>" . $e->getMessage() . '</strong>';
+		die();
+	} catch (Exception $e) {
+		echo "Exception: <strong>" . $e->getMessage() . '</strong>';
+		die();
+	}	
+}
+
+/**
+ * Search the Drupal nodes for a node which has the same title as our
+ * course page. Return the id if it is found or false.
+ *
+ * @param $lti Instance of LTILib
+ * @return the node id or false
+ */
+function lti_get_course_article_id($lti) {
+	
+	$title = $lti->getPacket()->custom_course_title . ' (' . $lti->getPacket()->custom_course_shortname . ')';
+	
+	return db_query("SELECT nid FROM node WHERE title LIKE :title", array(
+		':title' => $title	
+	))->fetchField();
+}
+
+/**
+ * Create a new article for a course. This will be created as a node
+ * with type 'article'. If an article with this name already exists,
+ * this will be used instead.
+ *
+ * @param $lti Instance of LTILib
+ * @param $user An authenticated user
+ * @return the node id of the course article
+ */
+function lti_create_course_article($lti, $user) {
+	
+	if (!in_array('administrator', $user->roles)) return false;
+	
+	// does this article already exist?
+	$title = $lti->getPacket()->custom_course_title . ' (' . $lti->getPacket()->custom_course_shortname . ')';
+	
+	$node_id = lti_get_course_article_id($lti);
+	
+	if (!$node_id) {
+		// it doesn't exist, so lets create it
+		$settings = array(
+			'body' => array(
+				LANGUAGE_NONE => array(
+					array(
+						'value' => 'Talk about ' . $lti->getPacket()->custom_course_title . ' here.',
+						'format' => filter_default_format(),
+					),	
+				),	
+			),
+			'title' => $title,
+			'changed' => REQUEST_TIME,
+			'moderate' => 0,
+			'comment' => 2,
+			'promote' => 1,
+			'revision' => 1,
+			'log' => '',
+			'status' => 1,
+			'sticky' => 0,
+			'type' => 'article',
+			'revisions' => null,
+			'language' => LANGUAGE_NONE,
+			'uid' => $user->uid,
+		);
+		
+		$node = (object) $settings;
+		node_save($node);
+		
+		// manually link the first revision to our user
+		db_update('node_revision')
+			->fields(array('uid' => $node->uid))
+			->condition('vid', $node->vid)
+			->execute();
+			
+		// node_save() doesn't return the ID of the new node, so we need to get that again
+		$node_id = db_query("SELECT nid FROM node WHERE title LIKE :title", array(
+			':title' => $title	
+		))->fetchField();
+		
+	}
+	
+	return $node_id;
+}
+
+/**
+ * Authenticates a consumer user with Drupal. If the user's name matches
+ * a name that is already in Drupal, that user will be used. Otherwise a
+ * new user will be created with the details passed from the consumer.
+ *
+ * @param $lti Instance of LTILib
+ * @return The user object
+ */
+function lti_auth_user($lti) {
+	
+	$user = user_load_by_name($lti->getPacket()->user_id);
+	
+	if (!$user) {
+		
+		// user doesn't exist -- create new user
+		
+		$role = '';
+		
+		if (false === strpos($lti->getPacket()->roles, 'Instructor')) {
+			// regular user
+			$role = user_role_load_by_name('authenticated user');
+			
+			if (!$role) {
+				// TODO: create a new role instead
+				throw new LTILibException("Could not load 'authenticated user' role");
+			}
+		} else {
+			// super user
+			$role = user_role_load_by_name('administrator');
+			
+			if (!$role) {
+				// TODO: create a new role instead
+				throw new LTILibException("Could not load 'administrator' role");
+			}
+		}
+		
+		$info = array();
+		$info['name'] = $lti->getPacket()->user_id;
+		$info['mail'] = $lti->getPacket()->custom_person_email;
+		$info['pass'] = user_password(8);
+		$info['roles'] = array($role->rid => $role->rid);
+		$info['status'] = 1;
+		
+		$user = user_save(drupal_anonymous_user(), $info);
+		
+		if (empty($user->uid)) {
+			throw new LTILibException("Could not create new user [".$info['name']."]");
+		}
+		
+	}
+	
+	$logged_in_id = lti_user_is_logged_in();
+	
+	// if this user is already logged in, that's fine
+	if ($logged_in_id == $user->uid) return $user;
+	
+	if ($logged_in_id) {
+		lti_user_logout();
+	}
+	
+	lti_user_login($user->uid);
+	
+	return $user;
+}
+
+/**
+ * Custom function to return the uid of the logged in user,
+ * or false if no one is logged in.
+ *
+ * @return uid or false
+ */
+function lti_user_is_logged_in() {
+	if ((bool) $GLOBALS['user']->uid) {
+		return $GLOBALS['user']->uid;
+	}
+	return false;
+}
+
+/**
+ * Custom log out function.
+ */
+function lti_user_logout() {
+	global $user;
+	// why isn't there an API for this?
+	watchdog('user', 'Session closed for %name.', array('%name' => $user->name));
+	session_destroy();
+}
+
+/**
+ * Custom log in function as Drupal doesn't seem to have
+ * a User API. This logs in the user specied by $user_id
+ *
+ * @param $user_id User to log in
+ */
+function lti_user_login($user_id) {
+	global $user;
+	$user = user_load($user_id);
+	watchdog('user', 'Session opened for %name.', array('%name' => $user->name));
+	$user->login = REQUEST_TIME;
+	db_update('users')
+		->fields(array('login' => $user->login))
+		->condition('uid', $user->uid)
+		->execute();
+	drupal_session_regenerate();
+	
+	$form_state = array();
+	$form_state['name'] = $user->name;
+	$form_state['pass'] = $user->pass;
+	//user_module_invoke('login', $form_state, $user);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

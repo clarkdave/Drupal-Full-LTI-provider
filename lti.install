@@ -1,0 +1,46 @@
+<?php
+
+function lti_schema() {
+	
+	$schema['lti_consumers'] = array(
+		
+		'description' => 'Table to maintain LTI consumers.',
+		'fields' => array(
+			'id' => array(
+				'type' => 'serial',
+				'unsigned' => true,
+				'not null' => true,	
+			),
+			'tool_proxy_guid' => array(
+				'type' => 'varchar',
+				'length' => '255',
+				'not null' => true,	
+			),
+			'consumer_guid' => array(
+				'type' => 'varchar',
+				'length' => '255',
+				'not null' => true,	
+			),
+			'consumer_user_id' => array(
+				'type' => 'varchar',
+				'length' => '255',
+			),
+			'secret' => array(
+				'type' => 'varchar',
+				'length' => '64',
+				'not null' => true,	
+			),
+			'time' => array(
+				'type' => 'int',
+				'unsigned' => true,
+				'not null' => true,
+				'default' => 0,	
+			),
+		),
+		'unique keys' => array(
+			'id' => array('id'),	
+		),
+	);
+	
+	return $schema;
+}
