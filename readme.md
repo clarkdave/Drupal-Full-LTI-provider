@@ -11,14 +11,14 @@ This module is an example Full LTI provider using the [LTILib](https://github.co
 
 ## Usage
 
-A VLE implementing the Full LTI specification (or a subset thereof) can register the Drupal tool can register the tool using the url *http://<url-to-drupal-install>/?lti\_deploy*. This will register the VLE consumer in the Drupal database and allow further request from the consumer to be authenticated.
+A VLE implementing the Full LTI specification (or a subset thereof) can register the Drupal tool can register the tool using the url *http://<url-to-drupal-install>/?lti_deploy*. This will register the VLE consumer in the Drupal database and allow further request from the consumer to be authenticated.
 
 ## Requirements
 
  * Drupal 7
  * [LTILib](https://github.com/clarkdave/LTILib)
  * A VLE which has an implementation of the Full LTI spec
- ** e.g. The [eile](http://code.google.com/p/eile/) project for Moodle
+	** e.g. The [eile](http://code.google.com/p/eile/) project for Moodle
  
 ## License 
 
